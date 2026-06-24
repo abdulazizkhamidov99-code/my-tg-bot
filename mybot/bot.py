@@ -13,7 +13,12 @@ from yt_dlp import YoutubeDL
 TOKEN = os.getenv("BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
+# Добавляем увеличенный таймаут для работы с тяжелыми файлами
+from aiogram.client.session.aiohttp import AiohttpSession
+session = AiohttpSession(timeout=300)
+
+bot = Bot(token=TOKEN, session=session, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 router = Router()
 
 # Общее хранилище файлов для пользователей
