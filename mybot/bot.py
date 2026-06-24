@@ -16,8 +16,8 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
-# Таймаут 5 минут для загрузки тяжелых файлов
-session = AiohttpSession(timeout=300)
+# КРИТИЧЕСКИЙ ФИКС ТАЙМАУТА: Даем боту 10 минут на отправку тяжелых видеороликов
+session = AiohttpSession(timeout=600)
 bot = Bot(token=TOKEN, session=session, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 router = Router()
 
@@ -26,12 +26,12 @@ user_files = {}
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     await message.answer(
-        "👋 <b>Привет! Я продвинутый медиа-бот!</b>\n\n"
-        "• Отправь мне <u>обычное видео</u>, и я извлеку звук + найду полный трек через Shazam!\n"
-        "• Отправь мне <u>ссылку из TikTok или Instagram</u>, и я скачаю её!"
+        "👋 <b>Привет! Я твой личный супер-загрузчик медиа!</b>\n\n"
+        "• Отправь мне <u>обычное видео</u>, и я извлеку звук + найду трек через Shazam!\n"
+        "• Отправь мне <u>ссылку</u> из <b>YouTube, Shorts, TikTok, Instagram, VK или Pinterest</b>, и я скачаю её!"
     )
 
-# --- 1. Обработчик обычных видеофайлов ---
+# --- 1. Обработчик обычных видеофайлов из Telegram ---
 @router.message(F.video)
 async def handle_video(message: Message):
     video_id = message.video.file_id
@@ -48,21 +48,24 @@ async def handle_video(message: Message):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎵 Вырезать звук + Найти оригинал", callback_data="get_audio")],
-        [InlineKeyboardButton(text="🎬 Вернуть видео", callback_data="get_video")]
+        [InlineKeyboardButton(text="🎬 Вернуть видео обратно", callback_data="get_video")]
     ])
     await msg.edit_text("Что нужно сделать с видеофайлом?", reply_markup=keyboard)
 
-# --- 2. Обработчик ссылок (TikTok, Instagram) ---
+# --- 2. Универсальный обработчик ссылок (YouTube, TikTok, Instagram, VK, Pinterest) ---
 @router.message(F.text.startswith("http"))
 async def handle_links(message: Message):
     url = message.text
     user_id = message.from_user.id
     
-    if "tiktok.com" not in url and "instagram.com" not in url:
-        await message.answer("❌ Я поддерживаю только ссылки из TikTok и Instagram.")
+    # Список поддерживаемых ключевых слов в ссылках
+    allowed_platforms = ["tiktok.com", "instagram.com", "youtube.com", "youtu.be", "vk.com", "pinterest.com"]
+    
+    if not any(platform in url for platform in allowed_platforms):
+        await message.answer("❌ Ссылка не поддерживается. Отправьте ссылку на YouTube, TikTok, Instagram, VK или Pinterest.")
         return
         
-    msg = await message.answer("⏳ Анализирую ссылку и загружаю контент...")
+    msg = await message.answer("⏳ Подключаюсь к платформе и скачиваю контент...")
     file_unique_id = str(uuid.uuid4())
     os.makedirs("downloads", exist_ok=True)
     output_template = f"downloads/{file_unique_id}.%(ext)s"
@@ -88,15 +91,15 @@ async def handle_links(message: Message):
                 [InlineKeyboardButton(text="🎬 Скачать Видео", callback_data="get_video")],
                 [InlineKeyboardButton(text="🎵 Скачать звук + Найти оригинал", callback_data="get_audio")]
             ])
-            await msg.edit_text("Медиа успешно загружено! Что вы хотите получить?", reply_markup=keyboard)
+            await msg.edit_text("Медиа успешно загружено из сети! Что вы хотите получить?", reply_markup=keyboard)
         else:
-            await msg.edit_text("❌ Не удалось сохранить файл. Попробуйте другую ссылку.")
+            await msg.edit_text("❌ Сервер не смог сохранить файл. Возможно, видео защищено приватностью.")
             
     except Exception as e:
-        logging.error(f"Ошибка yt-dlp: {e}")
-        await msg.edit_text("❌ Ошибка при скачивании. Возможно, профиль автора закрыт или ссылка неверна.")
+        logging.error(f"Ошибка скачивания ссылки: {e}")
+        await msg.edit_text("❌ Не удалось загрузить медиа по этой ссылке. Проверьте, открыт ли доступ к видео.")
 
-# --- Функция поиска полной песни по названию ---
+# --- Вспомогательная функция поиска оригинальной песни на YouTube ---
 async def download_full_track_by_name(search_query, user_id):
     file_unique_id = str(uuid.uuid4())
     output_path = f"downloads/full_{file_unique_id}"
@@ -116,41 +119,40 @@ async def download_full_track_by_name(search_query, user_id):
     try:
         loop = asyncio.get_event_loop()
         with YoutubeDL(ydl_opts) as ydl:
-            # Ищем песню на YouTube по ключевым словам от Shazam
             await loop.run_in_executor(None, lambda: ydl.download([f"ytsearch1:{search_query}"]))
         
         final_mp3 = f"{output_path}.mp3"
         if os.path.exists(final_mp3):
             return final_mp3
     except Exception as e:
-        logging.error(f"Ошибка скачивания полного трека: {e}")
+        logging.error(f"Ошибка поиска трека: {e}")
     return None
 
-# --- 3. Логика кнопок ---
+# --- 3. Обработка нажатий на кнопки (Выдача медиа) ---
 @router.callback_query(F.data.in_(["get_audio", "get_video"]))
 async def process_choice(callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
     choice = callback_query.data
     
     if user_id not in user_files:
-        await callback_query.message.answer("Файл не найден. Отправьте медиа заново.")
+        await callback_query.message.answer("Файл устарел. Отправьте ссылку или видео заново.")
         return
 
     video_path = user_files[user_id]
     msg = callback_query.message
     
     if choice == "get_audio":
-        await msg.edit_text("⏳ Вырезаю звук и отправляю в Shazam...")
+        await msg.edit_text("⏳ Обрабатываю аудио и запускаю Shazam-сканер...")
         audio_path = f"{video_path}.mp3"
         
         try:
-            # 1. Вырезаем кусок звука
+            # 1. Извлекаем звук из загруженного файла
             subprocess.run([
                 'ffmpeg', '-y', '-i', video_path, 
                 '-vn', '-acodec', 'libmp3lame', '-q:a', '2', audio_path
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 2. Пытаемся распознать трек через Shazam
+            # 2. Прогоняем звук через Shazam алгоритм
             shazam = Shazam()
             shazam_result = await shazam.recognize(audio_path)
             
@@ -161,46 +163,45 @@ async def process_choice(callback_query: CallbackQuery):
                 track_title = shazam_result['track'].get('title')
                 track_artist = shazam_result['track'].get('subtitle')
             
-            # Отправляем сначала обычную дорожку из видео
+            # Отправляем вырезанную дорожку
             audio_file = FSInputFile(audio_path)
-            await bot.send_audio(chat_id=user_id, audio=audio_file, caption="🎵 Звук из вашего видео готов!")
+            await bot.send_audio(chat_id=user_id, audio=audio_file, caption="🎵 Звук из видео успешно извлечен!")
             
-            # 3. Если Shazam нашел песню, ищем полную версию в интернете
+            # 3. Если Shazam узнал песню — качаем оригинал целиком
             if track_title and track_artist:
                 search_name = f"{track_artist} - {track_title}"
-                await bot.send_message(chat_id=user_id, text=f"🔍 Shazam определил трек: <b>{search_name}</b>\n⏳ Ищу и скачиваю полную оригинальную песню...")
+                await bot.send_message(chat_id=user_id, text=f"🔍 Shazam распознал трек: <b>{search_name}</b>\n⏳ Ищу и скачиваю полную оригинальную песню...")
                 
                 full_audio_path = await download_full_track_by_name(search_name, user_id)
                 
                 if full_audio_path and os.path.exists(full_audio_path):
-                    # Отправляем красивый полный оригинальный трек
                     full_audio_file = FSInputFile(full_audio_path)
                     await bot.send_audio(
                         chat_id=user_id, 
                         audio=full_audio_file, 
-                        caption=f"🎧 <b>Полный оригинальный трек найден!</b>\n Название: {track_title}\n Исполнитель: {track_artist}"
+                        caption=f"🎧 <b>Полный оригинальный трек!</b>\n📌 Название: {track_title}\n👤 Исполнитель: {track_artist}"
                     )
                     cleanup(full_audio_path)
                 else:
-                    await bot.send_message(chat_id=user_id, text="❌ К сожалению, не удалось скачать полную версию трека.")
+                    await bot.send_message(chat_id=user_id, text="❌ Не удалось выкачать оригинальный трек целиком.")
             else:
-                await bot.send_message(chat_id=user_id, text="ℹ️ Shazam не смог распознать музыку из этого видео.")
+                await bot.send_message(chat_id=user_id, text="ℹ️ Shazam не нашел совпадений для звука из этого видео.")
                 
             await msg.delete()
         except Exception as e:
-            await msg.edit_text(f"Ошибка: {e}")
+            await msg.edit_text(f"Произошла ошибка обработки звука: {e}")
         finally:
             cleanup(video_path, audio_path)
             if user_id in user_files: del user_files[user_id]
 
     elif choice == "get_video":
-        await msg.edit_text("⏳ Отправляю видеоролик...")
+        await msg.edit_text("⏳ Загружаю видеоролик в Telegram...")
         try:
             video_file = FSInputFile(video_path)
-            await bot.send_video(chat_id=user_id, video=video_file, caption="🎬 Ваше видео!")
+            await bot.send_video(chat_id=user_id, video=video_file, caption="🎬 Держите ваше видео!")
             await msg.delete()
         except Exception as e:
-            await msg.edit_text(f"Ошибка отправки видео: {e}")
+            await msg.edit_text(f"Ошибка отправки видео файла: {e}")
         finally:
             cleanup(video_path)
             if user_id in user_files: del user_files[user_id]
