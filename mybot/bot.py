@@ -1,14 +1,15 @@
 import logging
 import os
 import uuid
+import subprocess
 import asyncio
-import aiohttp
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.client.session.aiohttp import AiohttpSession
+from yt_dlp import YoutubeDL
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -56,45 +57,52 @@ async def handle_links(message: Message):
         await message.answer("❌ Отправьте ссылку на YouTube, TikTok или Instagram.")
         return
         
-    msg = await message.answer("⏳ Подключаюсь к шлюзу загрузки...")
+    msg = await message.answer("⏳ Подключаюсь к платформе и скачиваю медиа...")
     file_unique_id = str(uuid.uuid4())
     os.makedirs("downloads", exist_ok=True)
+    output_template = f"downloads/{file_unique_id}.%(ext)s"
     
-    api_url = "https://ryb.ooo"
-    payload = {"url": url, "vQuality": "720"}
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    # Новейшие усиленные опции обхода блокировок без сторонних API
+    ydl_opts = {
+        'outtmpl': output_template,
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'quiet': True,
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8',
+        }
+    }
     
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(api_url, json=payload, headers=headers) as resp:
-                result = await resp.json()
-                download_url = result.get("url")
+        loop = asyncio.get_event_loop()
+        with YoutubeDL(ydl_opts) as ydl:
+            await loop.run_in_executor(None, lambda: ydl.download([url]))
+            
+        actual_path = f"downloads/{file_unique_id}.mp4"
+        
+        # Защита от разных форматов расширений (mkv, webm и др.)
+        for ext in ['mp4', 'mkv', 'webm', '3gp']:
+            if os.path.exists(f"downloads/{file_unique_id}.{ext}"):
+                actual_path = f"downloads/{file_unique_id}.{ext}"
+                break
                 
-                if not download_url:
-                    await msg.edit_text("❌ Не удалось найти файл. Возможно, видео приватное.")
-                    return
-                
-                await msg.edit_text("⏳ Загружаю медиа на сервер...")
-                actual_path = f"downloads/{file_unique_id}.mp4"
-                
-                async with session.get(download_url) as file_resp:
-                    if file_resp.status == 200:
-                        with open(actual_path, 'wb') as f:
-                            f.write(await file_resp.read())
-                
-                if os.path.exists(actual_path) and os.path.getsize(actual_path) > 0:
-                    user_files[user_id] = actual_path
-                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="🎬 Скачать Видео", callback_data="get_video")],
-                        [InlineKeyboardButton(text="🎵 Скачать только Звук (MP3)", callback_data="get_audio")]
-                    ])
-                    await msg.edit_text("Медиа успешно загружено! Выберите формат:", reply_markup=keyboard)
-                else:
-                    await msg.edit_text("❌ Ошибка сохранения файла.")
-                    
+        if os.path.exists(actual_path) and os.path.getsize(actual_path) > 0:
+            user_files[user_id] = actual_path
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎬 Скачать Видео", callback_data="get_video")],
+                [InlineKeyboardButton(text="🎵 Скачать только Звук (MP3)", callback_data="get_audio")]
+            ])
+            await msg.edit_text("Медиа успешно загружено! Выберите формат:", reply_markup=keyboard)
+        else:
+            await msg.edit_text("❌ Не удалось скачать файл. Попробуйте другую ссылку.")
+            
     except Exception as e:
-        logging.error(f"Ошибка API: {e}")
-        await msg.edit_text("❌ Шлюз загрузки временно недоступен.")
+        logging.error(f"Ошибка загрузки: {e}")
+        await msg.edit_text("❌ Произошла ошибка при скачивании ролика.")
 
 @router.callback_query(F.data.in_(["get_audio", "get_video"]))
 async def process_choice(callback_query: CallbackQuery):
@@ -150,4 +158,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+    asyncio.run=main()
     asyncio.run(main())
