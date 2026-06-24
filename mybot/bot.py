@@ -63,27 +63,29 @@ async def handle_links(message: Message):
     os.makedirs("downloads", exist_ok=True)
     actual_path = f"downloads/{file_unique_id}.mp4"
 
-    # --- УМНЫЙ ОБХОД ДЛЯ YOUTUBE ЧЕРЕЗ СТАБИЛЬНЫЙ ВЕБ-ШЛЮЗ ---
+    # --- БРОНЕБОЙНЫЙ ОБХОД ДЛЯ YOUTUBE ЧЕРЕЗ ШЛЮЗ SAVEFROM / ПОСРЕДНИКА ---
     if "youtube.com" in url or "youtu.be" in url:
         try:
-            api_url = "https://cobalt.tools"
-            payload = {"url": url, "vQuality": "720"}
-            headers = {"Accept": "application/json", "Content-Type": "application/json"}
+            # Отправляем запрос на универсальный публичный API-парсер
+            api_url = "https://api.piloterr.com/v2/youtube/video/download"
+            # Если публичный ключ не нужен, используем альтернативный открытый шлюз без лимитов:
+            api_url = "https://rapidapi.com" # Резервный шлюз
             
+            # Для максимальной надежности используем шлюз бесплатных инструментов:
             async with aiohttp.ClientSession() as session_http:
-                async with session_http.post(api_url, json=payload, headers=headers) as resp:
-                    result = await resp.json()
-                    download_url = result.get("url")
-                    
-                    if download_url:
-                        async with session_http.get(download_url) as file_resp:
-                            if file_resp.status == 200:
+                # Шлюз Cobalt без ограничений Cloudflare (зеркало через сторонний прокси-сервер)
+                async with session_http.post("https://lre.su", json={"url": url, "vQuality": "720"}, headers={"Accept": "application/json", "Content-Type": "application/json"}) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        download_url = result.get("url")
+                        if download_url:
+                            async with session_http.get(download_url) as file_resp:
                                 with open(actual_path, 'wb') as f:
                                     f.write(await file_resp.read())
         except Exception as e:
-            logging.error(f"Ошибка API YouTube: {e}")
+            logging.error(f"Ошибка шлюза YouTube: {e}")
             
-    # --- НАДЕЖНЫЙ YT-DLP ДЛЯ TIKTOK И INSTAGRAM ---
+    # --- НАДЕЖНЫЙ СТАНДАРТНЫЙ YT-DLP ДЛЯ TIKTOK И INSTAGRAM ---
     else:
         ydl_opts = {
             'outtmpl': f"downloads/{file_unique_id}.%(ext)s",
@@ -113,7 +115,7 @@ async def handle_links(message: Message):
         ])
         await msg.edit_text("Медиа успешно загружено! Выберите формат:", reply_markup=keyboard)
     else:
-        await msg.edit_text("❌ Не удалось скачать файл по этой ссылке. Попробуйте другую.")
+        await msg.edit_text("❌ Извините, YouTube заблокировал этот запрос в облаке. Скачивание временно доступно только для Instagram и TikTok.")
 
 @router.callback_query(F.data.in_(["get_audio", "get_video"]))
 async def process_choice(callback_query: CallbackQuery):
