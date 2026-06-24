@@ -1,4 +1,3 @@
 aiogram
 static-ffmpeg
 yt-dlp
-shazamio==0.4.0
