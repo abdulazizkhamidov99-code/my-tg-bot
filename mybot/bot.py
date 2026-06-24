@@ -64,19 +64,24 @@ async def handle_links(message: Message):
     
     # Новейшие усиленные опции обхода блокировок без сторонних API
     ydl_opts = {
-        'outtmpl': output_template,
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8',
-        }
-    }
-    
+     'outtmpl': output_template,
+     'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+     'quiet': True,
+     'no_warnings': True,
+     'nocheckcertificate': True,
+     # Заставляем yt-dlp использовать альтернативные рабочие клиенты YouTube
+     'extractor_args': {
+         'youtube': {
+             'player_client': ['ios', 'android'],
+             'skip': ['dash', 'hls']
+         }
+     },
+     'http_headers': {
+         'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
+         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+         'Accept-Language': 'ru-RU,ru;q=0.9',
+     }
+ }
     try:
         loop = asyncio.get_event_loop()
         with YoutubeDL(ydl_opts) as ydl:
