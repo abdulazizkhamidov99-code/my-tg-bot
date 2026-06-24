@@ -3,6 +3,7 @@ import os
 import uuid
 import subprocess
 import asyncio
+import aiohttp
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
@@ -62,29 +63,27 @@ async def handle_links(message: Message):
     os.makedirs("downloads", exist_ok=True)
     actual_path = f"downloads/{file_unique_id}.mp4"
 
-    # --- ХИТРЫЙ ОБХОД ДЛЯ YOUTUBE ЧЕРЕЗ АЛЬТЕРНАТИВНЫЙ ШЛЮЗ ---
+    # --- УМНЫЙ ОБХОД ДЛЯ YOUTUBE ЧЕРЕЗ СТАБИЛЬНЫЙ ВЕБ-ШЛЮЗ ---
     if "youtube.com" in url or "youtu.be" in url:
         try:
-            import aiohttp
-            # Используем открытый шлюз Cobalt API без прокси, напрямую через веб-запрос
-            api_url = "https://ryb.ooo"
+            api_url = "https://cobalt.tools"
             payload = {"url": url, "vQuality": "720"}
             headers = {"Accept": "application/json", "Content-Type": "application/json"}
             
-            async with aiohttp.ClientSession() as session:
-                async with session.post(api_url, json=payload, headers=headers) as resp:
+            async with aiohttp.ClientSession() as session_http:
+                async with session_http.post(api_url, json=payload, headers=headers) as resp:
                     result = await resp.json()
                     download_url = result.get("url")
                     
                     if download_url:
-                        async with session.get(download_url) as file_resp:
+                        async with session_http.get(download_url) as file_resp:
                             if file_resp.status == 200:
                                 with open(actual_path, 'wb') as f:
                                     f.write(await file_resp.read())
         except Exception as e:
             logging.error(f"Ошибка API YouTube: {e}")
             
-    # --- СТАНДАРТНЫЙ НАДЕЖНЫЙ YT-DLP ДЛЯ TIKTOK И INSTAGRAM ---
+    # --- НАДЕЖНЫЙ YT-DLP ДЛЯ TIKTOK И INSTAGRAM ---
     else:
         ydl_opts = {
             'outtmpl': f"downloads/{file_unique_id}.%(ext)s",
@@ -98,7 +97,6 @@ async def handle_links(message: Message):
             with YoutubeDL(ydl_opts) as ydl:
                 await loop.run_in_executor(None, lambda: ydl.download([url]))
                 
-            # Проверяем расширения для TikTok/Insta
             for ext in ['mp4', 'mkv', 'webm', '3gp']:
                 if os.path.exists(f"downloads/{file_unique_id}.{ext}"):
                     actual_path = f"downloads/{file_unique_id}.{ext}"
@@ -106,7 +104,7 @@ async def handle_links(message: Message):
         except Exception as e:
             logging.error(f"Ошибка yt-dlp: {e}")
 
-    # --- ВЫДАЧА РЕЗУЛЬТАТА ПОЛЬЗОВАТЕЛЮ ---
+    # --- ВЫДАЧА РЕЗУЛЬТАТА ---
     if os.path.exists(actual_path) and os.path.getsize(actual_path) > 0:
         user_files[user_id] = actual_path
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -115,11 +113,7 @@ async def handle_links(message: Message):
         ])
         await msg.edit_text("Медиа успешно загружено! Выберите формат:", reply_markup=keyboard)
     else:
-        await msg.edit_text("❌ Ошибка: Не удалось скачать файл. Ссылка временно защищена. Попробуйте позже.")
-            
-    except Exception as e:
-        logging.error(f"Ошибка загрузки: {e}")
-        await msg.edit_text("❌ Не удалось обойти защиту YouTube. Ссылка временно недоступна.")
+        await msg.edit_text("❌ Не удалось скачать файл по этой ссылке. Попробуйте другую.")
 
 @router.callback_query(F.data.in_(["get_audio", "get_video"]))
 async def process_choice(callback_query: CallbackQuery):
@@ -156,7 +150,7 @@ async def process_choice(callback_query: CallbackQuery):
             await bot.send_video(chat_id=user_id, video=FSInputFile(video_path), caption="🎬 Ваше видео!")
             await msg.delete()
         except Exception as e:
-            await msg.edit_text(f"Ошибка video: {e}")
+            await msg.edit_text(f"Ошибка видео: {e}")
         finally:
             cleanup(video_path)
             if user_id in user_files: del user_files[user_id]
