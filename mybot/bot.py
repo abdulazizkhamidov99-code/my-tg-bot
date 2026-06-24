@@ -10,7 +10,6 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKe
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.client.session.aiohttp import AiohttpSession
-from yt_dlp import YoutubeDL
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -28,10 +27,10 @@ async def cmd_start(message: Message):
     await message.answer(
         "👋 <b>Привет! Я твой личный супер-загрузчик медиа!</b>\n\n"
         "• Отправь мне <u>обычное видео</u>, и я извлеку звук + распознаю трек как Shazam!\n"
-        "• Отправь мне <u>ссылку</u> из <b>YouTube, Shorts, TikTok, Instagram, VK или Pinterest</b>, и я скачаю её!"
+        "• Отправь мне <u>ссылку</u> из <b>YouTube, Shorts, TikTok или Instagram</b>, и я скачаю её!"
     )
 
-# --- 1. Обработчик видеофайлов ---
+# --- 1. Обработчик обычных видеофайлов из Telegram ---
 @router.message(F.video)
 async def handle_video(message: Message):
     video_id = message.video.file_id
@@ -52,112 +51,101 @@ async def handle_video(message: Message):
     ])
     await msg.edit_text("Что нужно сделать с видеофайлом?", reply_markup=keyboard)
 
-# --- 2. Универсальный обработчик ссылок ---
+# --- 2. Облачный обработчик ссылок через бесплатное стабильное API ---
 @router.message(F.text.startswith("http"))
 async def handle_links(message: Message):
     url = message.text
     user_id = message.from_user.id
     
-    allowed_platforms = ["tiktok.com", "instagram.com", "youtube.com", "youtu.be", "vk.com", "pinterest.com"]
+    allowed_platforms = ["tiktok.com", "instagram.com", "youtube.com", "youtu.be"]
     if not any(platform in url for platform in allowed_platforms):
-        await message.answer("❌ Ссылка не поддерживается. Отправьте ссылку на YouTube, TikTok, Instagram, VK или Pinterest.")
+        await message.answer("❌ Ссылка не поддерживается. Отправьте ссылку на YouTube, TikTok или Instagram.")
         return
         
-    msg = await message.answer("⏳ Подключаюсь к платформе и скачиваю контент...")
+    msg = await message.answer("⏳ Подключаюсь к облачному шлюзу загрузки...")
     file_unique_id = str(uuid.uuid4())
     os.makedirs("downloads", exist_ok=True)
-    output_template = f"downloads/{file_unique_id}.%(ext)s"
     
-       ydl_opts = {
-        'outtmpl': output_template,
-        'format': 'bestvideo+bestaudio/best',
-        'merge_output_format': 'mp4',
-        'quiet': True,
-        'no_warnings': True,
-        # УСИЛЕННЫЙ ОБХОД БЛОКИРОВОК YOUTUBE
-        'nocheckcertificate': True,
-        'ignoreerrors': True,
-        'no_color': True,
-        'geo_bypass': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-        }
-    }
+    # Используем стабильное публичное API для обхода любых банов YouTube/Insta
+    api_url = f"https://cobalt.tools"
+    payload = {"url": url, "vQuality": "720"}
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
     
     try:
-        loop = asyncio.get_event_loop()
-        with YoutubeDL(ydl_opts) as ydl:
-            await loop.run_in_executor(None, lambda: ydl.download([url]))
-            
-        actual_path = f"downloads/{file_unique_id}.mp4"
-    # Автоматически находим правильное расширение скачанного файла
-for ext in ['mp4', 'mkv', 'webm', '3gp']:
-if os.path.exists(f"downloads/{file_unique_id}.{ext}"):
-        actual_path = f"downloads/{file_unique_id}.{ext}"
-        break
-        if os.path.exists(actual_path):
-            user_files[user_id] = actual_path
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🎬 Скачать Видео", callback_data="get_video")],
-                [InlineKeyboardButton(text="🎵 Скачать звук + Найти оригинал", callback_data="get_audio")]
-            ])
-            await msg.edit_text("Медиа успешно загружено из сети! Что вы хотите получить?", reply_markup=keyboard)
-        else:
-            await msg.edit_text("❌ Сервер не смог сохранить файл. Возможно, видео скрыто приватностью.")
-            
+        async with aiohttp.ClientSession() as session:
+            async with session.post(api_url, json=payload, headers=headers) as resp:
+                if resp.status != 200:
+                    await msg.edit_text("❌ Облачный сервер сейчас перегружен. Попробуйте позже.")
+                    return
+                
+                result = await resp.json()
+                download_url = result.get("url")
+                
+                if not download_url:
+                    await msg.edit_text("❌ Не удалось найти видео по этой ссылке. Возможно, оно приватное.")
+                    return
+                
+                await msg.edit_text("⏳ Скачиваю файл на сервер бота...")
+                
+                # Скачиваем готовый чистый файл по выданной ссылке
+                actual_path = f"downloads/{file_unique_id}.mp4"
+                async with session.get(download_url) as file_resp:
+                    if file_resp.status == 200:
+                        with open(actual_path, 'wb') as f:
+                            f.write(await file_resp.read())
+                
+                if os.path.exists(actual_path) and os.path.getsize(actual_path) > 0:
+                    user_files[user_id] = actual_path
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🎬 Скачать Видео", callback_data="get_video")],
+                        [InlineKeyboardButton(text="🎵 Скачать звук + Найти оригинал", callback_data="get_audio")]
+                    ])
+                    await msg.edit_text("Медиа успешно загружено из сети! Что вы хотите получить?", reply_markup=keyboard)
+                else:
+                    await msg.edit_text("❌ Не удалось сохранить файл на сервере.")
+                    
     except Exception as e:
-        logging.error(f"Ошибка скачивания ссылки: {e}")
-        await msg.edit_text("❌ Не удалось загрузить медиа по этой ссылке.")
+        logging.error(f"Ошибка API скачивания: {e}")
+        await msg.edit_text("❌ Ошибка при соединении с сервером загрузки.")
 
-# --- Облачное распознавание музыки (Замена тяжелого Shazam) ---
+# --- Облачное распознавание музыки (Замена Shazam) ---
 async def recognize_audio_cloud(audio_path):
     try:
-        # Используем бесплатное открытое API для быстрого сканирования аудио слепков
         async with aiohttp.ClientSession() as session:
-            # Отправляем только первые 500КБ аудио для мгновенного распознавания
             with open(audio_path, 'rb') as f:
                 audio_data = f.read(500000)
-            
-            async with session.post('https://audd.io', data={'file': audio_data, 'return': 'apple_music'}) as resp:
+            async with session.post('https://audd.io', data={'file': audio_data}) as resp:
                 result = await resp.json()
                 if result and result.get('status') == 'success' and result.get('result'):
                     res = result['result']
                     return res.get('title'), res.get('artist')
     except Exception as e:
-        logging.error(f"Ошибка облачного распознавания: {e}")
+        logging.error(f"Ошибка распознавания: {e}")
     return None, None
 
-# --- Поиск полной оригинальной песни ---
+# --- Поиск полной оригинальной песни на YouTube ---
 async def download_full_track_by_name(search_query, user_id):
     file_unique_id = str(uuid.uuid4())
     output_path = f"downloads/full_{file_unique_id}"
-        ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': output_path + '.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-        'geo_bypass': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        }
-    }
+    
+    # Для поиска по названию используем то же надежное облачное API
+    api_url = f"https://cobalt.tools"
+    payload = {"url": f"ytsearch1:{search_query}", "audioOnly": True}
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    
     try:
-        loop = asyncio.get_event_loop()
-        with YoutubeDL(ydl_opts) as ydl:
-            await loop.run_in_executor(None, lambda: ydl.download([f"ytsearch1:{search_query}"]))
-        final_mp3 = f"{output_path}.mp3"
-        if os.path.exists(final_mp3):
-            return final_mp3
+        async with aiohttp.ClientSession() as session:
+            async with session.post(api_url, json=payload, headers=headers) as resp:
+                result = await resp.json()
+                download_url = result.get("url")
+                if download_url:
+                    final_mp3 = f"{output_path}.mp3"
+                    async with session.get(download_url) as file_resp:
+                        with open(final_mp3, 'wb') as f:
+                            f.write(await file_resp.read())
+                    return final_mp3
     except Exception as e:
-        logging.error(f"Ошибка поиска трека: {e}")
+        logging.error(f"Ошибка поиска полного трека: {e}")
     return None
 
 # --- 3. Логика кнопок выдачи контента ---
@@ -183,7 +171,6 @@ async def process_choice(callback_query: CallbackQuery):
                 '-vn', '-acodec', 'libmp3lame', '-q:a', '2', audio_path
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # Запускаем быстрое облачное распознавание трека
             track_title, track_artist = await recognize_audio_cloud(audio_path)
             
             audio_file = FSInputFile(audio_path)
@@ -236,8 +223,3 @@ async def main():
     dp = Dispatcher()
     dp.include_router(router)
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
