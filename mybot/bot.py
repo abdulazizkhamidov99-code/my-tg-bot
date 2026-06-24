@@ -60,52 +60,62 @@ async def handle_links(message: Message):
     msg = await message.answer("⏳ Подключаюсь к платформе и скачиваю медиа...")
     file_unique_id = str(uuid.uuid4())
     os.makedirs("downloads", exist_ok=True)
-    output_template = f"downloads/{file_unique_id}.%(ext)s"
-    
-    # БРОНЕБОЙНЫЕ НАСТРОЙКИ: Используем альтернативные шлюзы-зеркала для скрытия IP
-    ydl_opts = {
-        'outtmpl': output_template,
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-        # Подключаем бесплатное глобальное инстанс-прокси для обхода бана 403 Forbidden на серверах
-        'proxy': 'http://167.86.87.165:8080',  # Рабочий стабильный прокси-сервер
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['tv', 'ios'],
-                'skip': ['dash', 'hls']
-            }
-        },
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.9',
-        }
-    }
-    
-    try:
-        loop = asyncio.get_event_loop()
-        with YoutubeDL(ydl_opts) as ydl:
-            await loop.run_in_executor(None, lambda: ydl.download([url]))
+    actual_path = f"downloads/{file_unique_id}.mp4"
+
+    # --- ХИТРЫЙ ОБХОД ДЛЯ YOUTUBE ЧЕРЕЗ АЛЬТЕРНАТИВНЫЙ ШЛЮЗ ---
+    if "youtube.com" in url or "youtu.be" in url:
+        try:
+            import aiohttp
+            # Используем открытый шлюз Cobalt API без прокси, напрямую через веб-запрос
+            api_url = "https://ryb.ooo"
+            payload = {"url": url, "vQuality": "720"}
+            headers = {"Accept": "application/json", "Content-Type": "application/json"}
             
-        actual_path = f"downloads/{file_unique_id}.mp4"
-        
-        # Находим файл, если он скачался в другом расширении
-        for ext in ['mp4', 'mkv', 'webm', '3gp']:
-            if os.path.exists(f"downloads/{file_unique_id}.{ext}"):
-                actual_path = f"downloads/{file_unique_id}.{ext}"
-                break
+            async with aiohttp.ClientSession() as session:
+                async with session.post(api_url, json=payload, headers=headers) as resp:
+                    result = await resp.json()
+                    download_url = result.get("url")
+                    
+                    if download_url:
+                        async with session.get(download_url) as file_resp:
+                            if file_resp.status == 200:
+                                with open(actual_path, 'wb') as f:
+                                    f.write(await file_resp.read())
+        except Exception as e:
+            logging.error(f"Ошибка API YouTube: {e}")
+            
+    # --- СТАНДАРТНЫЙ НАДЕЖНЫЙ YT-DLP ДЛЯ TIKTOK И INSTAGRAM ---
+    else:
+        ydl_opts = {
+            'outtmpl': f"downloads/{file_unique_id}.%(ext)s",
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'quiet': True,
+            'no_warnings': True,
+            'nocheckcertificate': True,
+        }
+        try:
+            loop = asyncio.get_event_loop()
+            with YoutubeDL(ydl_opts) as ydl:
+                await loop.run_in_executor(None, lambda: ydl.download([url]))
                 
-        if os.path.exists(actual_path) and os.path.getsize(actual_path) > 0:
-            user_files[user_id] = actual_path
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🎬 Скачать Видео", callback_data="get_video")],
-                [InlineKeyboardButton(text="🎵 Скачать только Звук (MP3)", callback_data="get_audio")]
-            ])
-            await msg.edit_text("Медиа успешно загружено! Выберите формат:", reply_markup=keyboard)
-        else:
-            await msg.edit_text("❌ Ошибка: YouTube заблокировал этот запрос. Попробуйте еще раз через минуту.")
+            # Проверяем расширения для TikTok/Insta
+            for ext in ['mp4', 'mkv', 'webm', '3gp']:
+                if os.path.exists(f"downloads/{file_unique_id}.{ext}"):
+                    actual_path = f"downloads/{file_unique_id}.{ext}"
+                    break
+        except Exception as e:
+            logging.error(f"Ошибка yt-dlp: {e}")
+
+    # --- ВЫДАЧА РЕЗУЛЬТАТА ПОЛЬЗОВАТЕЛЮ ---
+    if os.path.exists(actual_path) and os.path.getsize(actual_path) > 0:
+        user_files[user_id] = actual_path
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🎬 Скачать Видео", callback_data="get_video")],
+            [InlineKeyboardButton(text="🎵 Скачать только Звук (MP3)", callback_data="get_audio")]
+        ])
+        await msg.edit_text("Медиа успешно загружено! Выберите формат:", reply_markup=keyboard)
+    else:
+        await msg.edit_text("❌ Ошибка: Не удалось скачать файл. Ссылка временно защищена. Попробуйте позже.")
             
     except Exception as e:
         logging.error(f"Ошибка загрузки: {e}")
