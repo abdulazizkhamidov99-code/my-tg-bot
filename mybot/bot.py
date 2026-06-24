@@ -60,7 +60,7 @@ async def handle_links(message: Message):
     file_unique_id = str(uuid.uuid4())
     os.makedirs("downloads", exist_ok=True)
     
-    api_url = "https://wuk.sh"
+    api_url = "https://ryb.ooo"
     payload = {"url": url, "vQuality": "720"}
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     
