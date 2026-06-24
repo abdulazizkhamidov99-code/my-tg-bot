@@ -68,16 +68,21 @@ async def handle_links(message: Message):
     os.makedirs("downloads", exist_ok=True)
     output_template = f"downloads/{file_unique_id}.%(ext)s"
     
-    ydl_opts = {
+       ydl_opts = {
         'outtmpl': output_template,
         'format': 'bestvideo+bestaudio/best',
         'merge_output_format': 'mp4',
         'quiet': True,
         'no_warnings': True,
+        # УСИЛЕННЫЙ ОБХОД БЛОКИРОВОК YOUTUBE
+        'nocheckcertificate': True,
+        'ignoreerrors': True,
+        'no_color': True,
+        'geo_bypass': True,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
         }
     }
     
@@ -87,7 +92,11 @@ async def handle_links(message: Message):
             await loop.run_in_executor(None, lambda: ydl.download([url]))
             
         actual_path = f"downloads/{file_unique_id}.mp4"
-        
+    # Автоматически находим правильное расширение скачанного файла
+for ext in ['mp4', 'mkv', 'webm', '3gp']:
+if os.path.exists(f"downloads/{file_unique_id}.{ext}"):
+        actual_path = f"downloads/{file_unique_id}.{ext}"
+        break
         if os.path.exists(actual_path):
             user_files[user_id] = actual_path
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -124,7 +133,7 @@ async def recognize_audio_cloud(audio_path):
 async def download_full_track_by_name(search_query, user_id):
     file_unique_id = str(uuid.uuid4())
     output_path = f"downloads/full_{file_unique_id}"
-    ydl_opts = {
+        ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_path + '.%(ext)s',
         'postprocessors': [{
@@ -134,8 +143,10 @@ async def download_full_track_by_name(search_query, user_id):
         }],
         'quiet': True,
         'no_warnings': True,
+        'nocheckcertificate': True,
+        'geo_bypass': True,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         }
     }
     try:
