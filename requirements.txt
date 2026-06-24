@@ -1,3 +1,2 @@
 aiogram
 static-ffmpeg
-yt-dlp
