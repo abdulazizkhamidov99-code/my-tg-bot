@@ -60,7 +60,7 @@ async def process_choice(callback_query: CallbackQuery):
         try:
             # Запуск ffmpeg.exe, который лежит в той же папке
             subprocess.run([
-                'ffdl_ffmpeg', '-y', '-i', video_path, 
+                'ffmpeg', '-y', '-i', video_path, 
                 '-vn', '-acodec', 'libmp3lame', '-q:a', '2', audio_path
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
