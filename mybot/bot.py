@@ -10,7 +10,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.client.session.aiohttp import AiohttpSession
 from yt_dlp import YoutubeDL
-from shazamio import Shazam
+from shazamio_async import Shazam
 
 TOKEN = os.getenv("BOT_TOKEN")
 
